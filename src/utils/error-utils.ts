@@ -1,68 +1,4 @@
-import { Logger } from "./logger.js";
-import { ErrorHandler, createErrorHandler, AppError, ErrorCategory, ErrorSeverity } from "./error-handler.js";
-
-/**
- * Global error handler instance
- */
-let globalErrorHandler: ErrorHandler | null = null;
-
-/**
- * Initialize the global error handler
- */
-export function initializeGlobalErrorHandler(logger: Logger, serviceName?: string): void {
-  globalErrorHandler = createErrorHandler(logger, serviceName);
-}
-
-/**
- * Get the global error handler
- */
-export function getGlobalErrorHandler(): ErrorHandler {
-  if (!globalErrorHandler) {
-    throw new AppError(
-      "Global error handler not initialized",
-      "ERROR_HANDLER_NOT_INITIALIZED",
-      ErrorCategory.SYSTEM,
-      ErrorSeverity.CRITICAL,
-    );
-  }
-  return globalErrorHandler;
-}
-
-/**
- * Handle an error using the global error handler
- */
-export function handleError(error: Error | AppError, context?: Record<string, unknown>): void {
-  const handler = getGlobalErrorHandler();
-  handler.handle(error, context);
-}
-
-/**
- * Safe async execution with error handling
- */
-export async function safeAsync<T>(
-  operation: () => Promise<T>,
-  context?: Record<string, unknown>,
-  fallback?: T,
-): Promise<T | null> {
-  try {
-    return await operation();
-  } catch (error) {
-    handleError(error as Error, context);
-    return fallback ?? null;
-  }
-}
-
-/**
- * Safe sync execution with error handling
- */
-export function safeSync<T>(operation: () => T, context?: Record<string, unknown>, fallback?: T): T | null {
-  try {
-    return operation();
-  } catch (error) {
-    handleError(error as Error, context);
-    return fallback ?? null;
-  }
-}
+import { AppError, ErrorCategory, errorHandler, ErrorSeverity } from "./error-handler.js";
 
 /**
  * Retry mechanism with exponential backoff
@@ -88,17 +24,13 @@ export async function withRetry<T>(
       lastError = error as Error;
 
       if (attempt === maxRetries) {
-        handleError(lastError, {
-          ...context,
-          maxRetries,
-          finalAttempt: true,
-        });
+        errorHandler.handle(lastError, context);
         throw lastError;
       }
 
       const delay = Math.min(baseDelay * Math.pow(backoffFactor, attempt), maxDelay);
 
-      handleError(lastError, {
+      errorHandler.handle(lastError, {
         ...context,
         attempt: attempt + 1,
         maxRetries,
@@ -129,7 +61,7 @@ export async function withTimeout<T>(
         ErrorSeverity.MEDIUM,
         { timeoutMs, ...context },
       );
-      handleError(timeoutError);
+      errorHandler.handle(timeoutError);
       reject(timeoutError);
     }, timeoutMs);
 
@@ -140,7 +72,7 @@ export async function withTimeout<T>(
       })
       .catch((error) => {
         clearTimeout(timer);
-        handleError(error as Error, context);
+        errorHandler.handle(error as Error, context);
         reject(error);
       });
   });
@@ -152,14 +84,14 @@ export async function withTimeout<T>(
 export function setupGlobalErrorHandlers(): void {
   process.on("unhandledRejection", (reason, promise) => {
     const error = reason instanceof Error ? reason : new Error(String(reason));
-    handleError(error, {
+    errorHandler.handle(error, {
       type: "unhandledRejection",
       promise: promise.toString(),
     });
   });
 
   process.on("uncaughtException", (error) => {
-    handleError(error, {
+    errorHandler.handle(error, {
       type: "uncaughtException",
     });
 
@@ -174,7 +106,7 @@ export function setupGlobalErrorHandlers(): void {
 export function setupGracefulShutdown(signals: string[] = ["SIGTERM", "SIGINT"]): void {
   signals.forEach((signal) => {
     process.on(signal, () => {
-      handleError(
+      errorHandler.handle(
         new AppError(
           `Received ${signal}, initiating graceful shutdown`,
           "GRACEFUL_SHUTDOWN",

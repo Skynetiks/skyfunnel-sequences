@@ -1,4 +1,6 @@
-import { Logger } from "./logger.js";
+import Postgres from "postgres";
+import { env } from "../config/env.js";
+import { logger, Logger } from "./logger.js";
 
 /**
  * Error severity levels
@@ -137,7 +139,6 @@ export class SystemError extends AppError {
  * Error handler configuration
  */
 export interface ErrorHandlerConfig {
-  logger: Logger;
   serviceName?: string;
   enableStackTrace?: boolean;
   enableMetrics?: boolean;
@@ -148,14 +149,12 @@ export interface ErrorHandlerConfig {
  */
 export class ErrorHandler {
   private logger: Logger;
-  private serviceName?: string;
   private enableStackTrace: boolean;
   private enableMetrics: boolean;
   private errorCounts: Map<string, number> = new Map();
 
   constructor(config: ErrorHandlerConfig) {
-    this.logger = config.logger;
-    this.serviceName = config.serviceName;
+    this.logger = logger;
     this.enableStackTrace = config.enableStackTrace ?? true;
     this.enableMetrics = config.enableMetrics ?? false;
   }
@@ -165,7 +164,6 @@ export class ErrorHandler {
    */
   handle(error: Error | AppError, context?: Record<string, unknown>): void {
     const errorContext = {
-      service: this.serviceName,
       ...context,
     };
 
@@ -243,57 +241,74 @@ export class ErrorHandler {
   resetErrorMetrics(): void {
     this.errorCounts.clear();
   }
-
-  /**
-   * Create a new error handler with additional context
-   */
-  withContext(context: Record<string, unknown>): ErrorHandler {
-    const childLogger = this.logger.child(context);
-    return new ErrorHandler({
-      logger: childLogger,
-      serviceName: this.serviceName,
-      enableStackTrace: this.enableStackTrace,
-      enableMetrics: this.enableMetrics,
-    });
-  }
 }
 
-/**
- * Utility function to create an error handler for a service
- */
-export function createErrorHandler(logger: Logger, serviceName?: string): ErrorHandler {
-  return new ErrorHandler({
-    logger,
-    serviceName,
-    enableStackTrace: true,
-    enableMetrics: true,
-  });
-}
+export const errorHandler = new ErrorHandler({ enableMetrics: env.ENABLE_METRICS, enableStackTrace: env.ENABLE_DEBUG });
 
 /**
  * Async error wrapper that catches and handles errors
  */
-export async function withErrorHandling<T>(
-  errorHandler: ErrorHandler,
-  operation: () => Promise<T>,
-  context?: Record<string, unknown>,
-): Promise<T | null> {
+type ErrorParser = (error: Error) => Error;
+
+export function withErrorHandlingFn<T, A>(
+  operation: (args: A) => Promise<T>,
+  options: {
+    context?: Record<string, unknown>;
+    parser?: ErrorParser;
+    rethrow?: boolean; // optional flag to rethrow instead of swallowing
+  } = {},
+): (args: A) => Promise<[T | null, Error | null]> {
+  const { context = {}, parser, rethrow = false } = options;
+
+  return async (args: A): Promise<[T | null, Error | null]> => {
+    try {
+      const res = await operation(args);
+      return [res, null];
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      const parsedError = parser ? parser(error) : error;
+
+      // try to use the global error handler
+      try {
+        errorHandler.handle(parsedError, context);
+      } catch (handlerErr) {
+        logger.error("Error handler failed:", { handlerErr });
+      }
+
+      if (rethrow) {
+        throw parsedError;
+      }
+      return [null, parsedError];
+    }
+  };
+}
+
+export function tryCatch<T>(operation: () => T, context?: Record<string, unknown>): [T | null, Error | null] {
   try {
-    return await operation();
-  } catch (error) {
-    errorHandler.handle(error as Error, context);
-    return null;
+    return [operation(), null];
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    errorHandler.handle(error, context);
+    return [null, error];
   }
 }
+
+export const dbErrorParser: ErrorParser = (error) => {
+  if (error instanceof Postgres.PostgresError) {
+    return new DatabaseError(error.message, {
+      originalError: error.name,
+      code: error.code,
+      detail: error.detail,
+      where: error.where,
+    });
+  }
+  return error;
+};
 
 /**
  * Sync error wrapper that catches and handles errors
  */
-export function withErrorHandlingSync<T>(
-  errorHandler: ErrorHandler,
-  operation: () => T,
-  context?: Record<string, unknown>,
-): T | null {
+export function withErrorHandlingSync<T>(operation: () => T, context?: Record<string, unknown>): T | null {
   try {
     return operation();
   } catch (error) {
@@ -305,7 +320,7 @@ export function withErrorHandlingSync<T>(
 /**
  * Decorator for async methods to automatically handle errors
  */
-export function handleErrors(errorHandler: ErrorHandler, context?: Record<string, unknown>) {
+export function handleErrors(context?: Record<string, unknown>) {
   return function (target: unknown, propertyName: string, descriptor: PropertyDescriptor) {
     const method = descriptor.value;
 

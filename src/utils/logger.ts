@@ -180,13 +180,6 @@ export class Logger {
 export const logger = new Logger();
 
 /**
- * Create a new logger instance
- */
-export function createLogger(config?: Partial<LoggerConfig>): Logger {
-  return new Logger(config);
-}
-
-/**
  * Utility function to log function execution time
  */
 export async function logExecutionTime<T>(
@@ -215,14 +208,4 @@ export async function logExecutionTime<T>(
  */
 export function withContext(context: Record<string, unknown>): Logger {
   return logger.child(context);
-}
-
-/**
- * Utility function to create a logger for a specific service
- */
-export function createServiceLogger(serviceName: string, additionalContext?: Record<string, unknown>): Logger {
-  return logger.child({
-    service: serviceName,
-    ...additionalContext,
-  });
 }

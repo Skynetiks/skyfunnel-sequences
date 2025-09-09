@@ -1,0 +1,30 @@
+services:
+  pump:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pump
+    env_file:
+      - .env
+    entrypoint: ["node", "pump/index.js"]
+    restart: unless-stopped
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scheduler
+    env_file:
+      - .env
+    entrypoint: ["node", "scheduler/index.js"]
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: worker
+    env_file:
+      - .env
+    entrypoint: ["node", "worker/index.js"]
+    restart: unless-stopped

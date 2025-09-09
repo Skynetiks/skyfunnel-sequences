@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  pump:
+    image: ${APP_IMAGE}
+    container_name: pump
+    entrypoint: ["bun", "pump/index.js"]
+    restart: unless-stopped
+    env_file:
+      - .env
+
+  scheduler:
+    image: ${APP_IMAGE}
+    container_name: scheduler
+    entrypoint: ["bun", "scheduler/index.js"]
+    restart: unless-stopped
+    env_file:
+      - .env
+
+  worker:
+    image: ${APP_IMAGE}
+    container_name: worker
+    entrypoint: ["bun", "worker/index.js"]
+    restart: unless-stopped
+    env_file:
+      - .env

@@ -3,16 +3,7 @@
  */
 
 // Logger
-export {
-  Logger,
-  logger,
-  createLogger,
-  createServiceLogger,
-  logExecutionTime,
-  withContext,
-  type LogLevel,
-  type LoggerConfig,
-} from "./logger.js";
+export { Logger, logger, logExecutionTime, withContext, type LogLevel, type LoggerConfig } from "./logger.js";
 
 // Error Handling
 export {
@@ -30,8 +21,6 @@ export {
 
   // Error handler
   ErrorHandler,
-  createErrorHandler,
-  withErrorHandling,
   withErrorHandlingSync,
   handleErrors,
 
@@ -50,14 +39,4 @@ export {
 } from "./error-handler.js";
 
 // Error utilities
-export {
-  initializeGlobalErrorHandler,
-  getGlobalErrorHandler,
-  handleError,
-  safeAsync,
-  safeSync,
-  withRetry,
-  withTimeout,
-  setupGlobalErrorHandlers,
-  setupGracefulShutdown,
-} from "./error-utils.js";
+export { withRetry, withTimeout, setupGlobalErrorHandlers, setupGracefulShutdown } from "./error-utils.js";

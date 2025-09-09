@@ -13,10 +13,11 @@
     "format": "prettier --write 'src/**/*.{ts,js,json}'",
     "env:validate": "bun run scripts/validate-env.ts",
     "env:check": "bun run env:validate",
-    "docker:build": "docker compose -f docker/docker-compose.prod.yml build",
-    "docker:up": "docker compose -f docker/docker-compose.prod.yml up -d",
-    "docker:down": "docker compose -f docker/docker-compose.prod.yml down",
-    "docker:logs": "docker compose -f docker/docker-compose.prod.yml logs -f"
+    "build": "bun build --target=bun --outdir=dist ./src/apps/scheduler/index.ts ./src/apps/worker/index.ts ./src/apps/pump/index.ts",
+    "docker:build": "docker compose -f docker-compose.prod.yml build",
+    "docker:up": "docker compose -f docker-compose.prod.yml up -d",
+    "docker:down": "docker compose -f docker-compose.prod.yml down",
+    "docker:logs": "docker compose -f docker-compose.prod.yml logs -f"
   },
   "dependencies": {
     "pino": "^9.9.4",
