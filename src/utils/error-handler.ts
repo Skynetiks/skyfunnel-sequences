@@ -250,19 +250,19 @@ export const errorHandler = new ErrorHandler({ enableMetrics: env.ENABLE_METRICS
  */
 type ErrorParser = (error: Error) => Error;
 
-export function withErrorHandlingFn<T, A>(
-  operation: (args: A) => Promise<T>,
+export function withErrorHandlingFn<T, A extends Array<unknown>>(
+  operation: (...args: A) => Promise<T>,
   options: {
     context?: Record<string, unknown>;
     parser?: ErrorParser;
     rethrow?: boolean; // optional flag to rethrow instead of swallowing
   } = {},
-): (args: A) => Promise<[T | null, Error | null]> {
+): (...args: A) => Promise<[T | null, Error | null]> {
   const { context = {}, parser, rethrow = false } = options;
 
-  return async (args: A): Promise<[T | null, Error | null]> => {
+  return async (...args: A): Promise<[T | null, Error | null]> => {
     try {
-      const res = await operation(args);
+      const res = await operation(...args);
       return [res, null];
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));

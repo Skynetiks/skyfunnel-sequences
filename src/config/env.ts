@@ -13,6 +13,8 @@ const envSchema = z.object({
   // Logging
   LOG_LEVEL: z.enum(["error", "warn", "info", "debug"]).default("info"),
 
+  RABBIT_MQ_URL: z.string().url("RABBIT_MQ_URL must be a valid URL"),
+
   // Feature Flags
   ENABLE_METRICS: z
     .string()
@@ -22,6 +24,8 @@ const envSchema = z.object({
     .string()
     .transform((val) => val === "true")
     .default("false"),
+
+  GEMINI_API_KEY: z.string().min(1, "GEMINI_API_KEY is required"),
 });
 
 // Parse and validate environment variables
