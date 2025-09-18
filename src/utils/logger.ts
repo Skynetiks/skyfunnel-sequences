@@ -85,6 +85,7 @@ export class Logger {
       if (config.level) {
         pinoConfig.level = config.level;
       }
+
       if (config.base) {
         pinoConfig.base = { ...pinoConfig.base, ...config.base };
       }

@@ -50,8 +50,7 @@ export interface EmailCampaignTemplate {
   id: string;
   name: string;
   subject: string;
-  body: string;
-  variables?: string[];
+  bodyHTML: string;
 }
 
 export interface TemplateData {
@@ -95,6 +94,7 @@ export type LeadWithEnrichment = LeadData & {
  * Fetches lead data by lead ID
  */
 export const fetchLeadData = async (leadId: string): Promise<LeadWithEnrichment | null> => {
+  logger.debug("Fetching lead data", { leadId });
   try {
     const [lead] = await sql<
       (LeadData & {
@@ -163,13 +163,19 @@ export const fetchLeadData = async (leadId: string): Promise<LeadWithEnrichment 
           e."insightsData"       as "enrichment_insightsData",
           e."linkedinRawJson"    as "enrichment_linkedinRawJson"
         FROM "Lead" l
-        LEFT JOIN "LeadEnrichment" e ON e."leadId" = l.id
+        JOIN "LeadEnrichment" e ON e."leadId" = l.id
         WHERE l.id = ${leadId}
       `;
 
+    //   lead                         lead_enrichment
+    //
+
     if (!lead) {
+      logger.error("No lead data found", { leadId });
       return null;
     }
+
+    logger.debug("Lead data found", { lead });
 
     const {
       enrichment_linkedinUrl,
@@ -226,45 +232,6 @@ export const fetchLeadData = async (leadId: string): Promise<LeadWithEnrichment 
   }
 };
 
-/**
- * Fetches multiple leads by IDs
- */
-export const fetchLeadsData = async (leadIds: string[]): Promise<LeadData[]> => {
-  try {
-    const leads = await sql<LeadData[]>`
-      SELECT
-        id,
-        email,
-        "firstName",
-        "lastName",
-        "companyName",
-        "companyWebsite",
-        "jobTitle",
-        phone,
-        address,
-        state,
-        country,
-        industry,
-        "companySize",
-        "annualRevenue",
-        "conversionRate",
-        source,
-        "linkedinUrl",
-        "organizationId",
-        "assignedTo",
-        "isSubscribedToEmail",
-        "isEmailValid"
-      FROM "Lead"
-      WHERE id = ANY(${leadIds})
-    `;
-
-    return leads;
-  } catch (error) {
-    logger.error("Failed to fetch leads data", { leadIds, error });
-    throw new Error(`Failed to fetch leads data for ${leadIds.join(", ")}`);
-  }
-};
-
 // ============================================================================
 // SEQUENCE QUERIES
 // ============================================================================
@@ -273,13 +240,13 @@ export const fetchLeadsData = async (leadIds: string[]): Promise<LeadData[]> => 
  * Fetches sequence step data with template information
  */
 export const fetchSequenceStep = async (stepId: string): Promise<SequenceStep | null> => {
+  logger.debug("Fetching sequence step", { stepId });
   try {
     const [step] = await sql<SequenceStep[]>`
-      SELECT
+    SELECT
         s.id,
         s."sequenceId",
         s."stepNumber",
-        s."templateId",
         s."minIntervalMin",
         s."timeWindows",
         s."requireNoReply",
@@ -288,36 +255,15 @@ export const fetchSequenceStep = async (stepId: string): Promise<SequenceStep | 
       WHERE s.id = ${stepId}
     `;
 
+    if (!step) {
+      logger.error("No sequence step found", { stepId });
+      return null;
+    }
+
     return step || null;
   } catch (error) {
     logger.error("Failed to fetch sequence step", { stepId, error });
     throw new Error(`Failed to fetch sequence step ${stepId}`);
-  }
-};
-
-/**
- * Fetches multiple sequence steps by IDs
- */
-export const fetchSequenceSteps = async (stepIds: string[]): Promise<SequenceStep[]> => {
-  try {
-    const steps = await sql<SequenceStep[]>`
-      SELECT
-        s.id,
-        s."sequenceId",
-        s."stepNumber",
-        s."templateId",
-        s."minIntervalMin",
-        s."timeWindows",
-        s."requireNoReply",
-        s."stopOnBounce"
-      FROM "SequenceStep" s
-      WHERE s.id = ANY(${stepIds})
-    `;
-
-    return steps;
-  } catch (error) {
-    logger.error("Failed to fetch sequence steps", { stepIds, error });
-    throw new Error(`Failed to fetch sequence steps for ${stepIds.join(", ")}`);
   }
 };
 
@@ -328,35 +274,26 @@ export const fetchSequenceSteps = async (stepIds: string[]): Promise<SequenceSte
 /**
  * Fetches sequence template and email campaign template data
  */
-export const fetchEmailTemplate = async (templateId: string): Promise<TemplateData | null> => {
+export const fetchEmailTemplate = async (stepId: string): Promise<TemplateData | null> => {
   try {
-    const [result] = await sql<
-      Array<{
-        id: string;
-        templateId: string;
-        sequenceSubject: string;
-        emailTemplateId: string;
-        name: string;
-        emailSubject: string;
-        body: string;
-        variables?: string[];
-      }>
-    >`
-      SELECT
+    console.log("Fetching email template", { stepId });
+    const [result] = await sql`
+       SELECT
         st.id,
-        st."templateId",
-        st.subject as "sequenceSubject",
-        ect.id as "emailTemplateId",
+        st.subject AS "sequenceSubject",
+        ect.id AS "emailTemplateId",
         ect.name,
-        ect.subject as "emailSubject",
-        ect.body,
-        ect.variables
-      FROM "SequenceTemplate" st
-      JOIN "EmailCampaignTemplate" ect ON st."templateId" = ect.id
-      WHERE st.id = ${templateId}
-    `;
+        ect."bodyHTML"
+        FROM "_SequenceStepToSequenceTemplate" j
+        JOIN "SequenceTemplate" st ON j."B" = st.id
+        JOIN "EmailCampaignTemplate" ect ON st."templateId" = ect.id
+        WHERE j."A" = ${stepId}
+        ORDER BY random()
+        LIMIT 1;
+      `;
 
     if (!result) {
+      logger.error("No email template found", { stepId });
       return null;
     }
 
@@ -370,95 +307,13 @@ export const fetchEmailTemplate = async (templateId: string): Promise<TemplateDa
         id: result.emailTemplateId,
         name: result.name,
         subject: result.emailSubject,
-        body: result.body,
-        variables: result.variables,
+        bodyHTML: result.bodyHTML,
       },
     };
   } catch (error) {
-    logger.error("Failed to fetch email template", { templateId, error });
-    throw new Error(`Failed to fetch email template ${templateId}`);
-  }
-};
-
-/**
- * Fetches multiple email templates by IDs
- */
-export const fetchEmailTemplates = async (templateIds: string[]): Promise<Map<string, TemplateData>> => {
-  try {
-    const results = await sql<
-      Array<{
-        id: string;
-        templateId: string;
-        sequenceSubject: string;
-        emailTemplateId: string;
-        name: string;
-        emailSubject: string;
-        body: string;
-        variables?: string[];
-      }>
-    >`
-      SELECT
-        st.id,
-        st."templateId",
-        st.subject as "sequenceSubject",
-        ect.id as "emailTemplateId",
-        ect.name,
-        ect.subject as "emailSubject",
-        ect.body,
-        ect.variables
-      FROM "SequenceTemplate" st
-      JOIN "EmailCampaignTemplate" ect ON st."templateId" = ect.id
-      WHERE st.id = ANY(${templateIds})
-    `;
-
-    const templateMap = new Map<string, TemplateData>();
-
-    results.forEach((result) => {
-      templateMap.set(result.id, {
-        sequenceTemplate: {
-          id: result.id,
-          templateId: result.templateId,
-          subject: result.sequenceSubject,
-        },
-        emailTemplate: {
-          id: result.emailTemplateId,
-          name: result.name,
-          subject: result.emailSubject,
-          body: result.body,
-          variables: result.variables,
-        },
-      });
+    logger.error("Failed to fetch email template", {
+      error,
     });
-
-    return templateMap;
-  } catch (error) {
-    logger.error("Failed to fetch email templates", { templateIds, error });
-    throw new Error(`Failed to fetch email templates for ${templateIds.join(", ")}`);
-  }
-};
-
-// ============================================================================
-// BATCH QUERIES
-// ============================================================================
-
-/**
- * Fetches all required data for processing multiple leads in batch
- */
-export const fetchBatchProcessingData = async (leadIds: string[], stepIds: string[], templateIds: string[]) => {
-  try {
-    const [leads, steps, templates] = await Promise.all([
-      fetchLeadsData(leadIds),
-      fetchSequenceSteps(stepIds),
-      fetchEmailTemplates(templateIds),
-    ]);
-
-    return {
-      leads,
-      steps,
-      templates,
-    };
-  } catch (error) {
-    logger.error("Failed to fetch batch processing data", { leadIds, stepIds, templateIds, error });
-    throw new Error("Failed to fetch batch processing data");
+    throw new Error(`Failed to fetch email template`);
   }
 };

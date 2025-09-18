@@ -10,24 +10,17 @@ import { SEQUENCE_TOPIC } from "../../constant";
 // SCHEMAS & TYPES
 // ============================================================================
 
-const PendingLeadSchema = z.object({
-  lead_state_id: z.string().uuid("Invalid lead_state_id format"),
-  lead_id: z.string().uuid("Invalid lead_id format"),
-  sequence_id: z.string().uuid("Invalid sequence_id format"),
+export const PendingLeadSchema = z.object({
+  lead_state_id: z.string(),
+  lead_id: z.string(),
+  sequence_id: z.string(),
   current_step: z.number().int().min(0, "Current step must be non-negative"),
-  step_id: z.string().uuid("Invalid step_id format"),
+  step_id: z.string(),
   step_number: z.number().int().min(1, "Step number must be positive"),
   min_interval_min: z.number().int().min(0, "Min interval must be non-negative"),
 });
 
-const WorkerMessageSchema = z.object({
-  id: z.string().optional(),
-  type: z.string().min(1, "Message type cannot be empty"),
-  payload: PendingLeadSchema,
-  timestamp: z.number().optional(),
-});
-
-type WorkerMessage = z.infer<typeof WorkerMessageSchema>;
+type WorkerMessage = z.infer<typeof PendingLeadSchema>;
 
 // ============================================================================
 // DATABASE OPERATIONS
@@ -95,14 +88,9 @@ const onSuccessfulMessage = async (lead: PendingLead) => {
  * @param message - The validated worker message
  * @throws {Error} If message processing fails
  */
-const handleMessage = async (message: WorkerMessage): Promise<void> => {
-  const { id: messageId, type, payload: lead } = message;
-
+const handleMessage = async (lead: WorkerMessage): Promise<void> => {
   logger.info("Handling worker message", {
-    messageId,
-    type,
-    leadId: lead.lead_id,
-    sequenceId: lead.sequence_id,
+    lead,
   });
 
   try {
@@ -110,8 +98,6 @@ const handleMessage = async (message: WorkerMessage): Promise<void> => {
     await onSuccessfulMessage(lead);
   } catch (error) {
     logger.error("Message handling failed", {
-      messageId,
-      type,
       leadId: lead.lead_id,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -127,7 +113,7 @@ const handleMessage = async (message: WorkerMessage): Promise<void> => {
 const parseAndValidateMessage = (rawMessage: string): WorkerMessage | null => {
   try {
     const parsed = JSON.parse(rawMessage);
-    return WorkerMessageSchema.parse(parsed);
+    return PendingLeadSchema.parse(parsed);
   } catch (error) {
     if (error instanceof z.ZodError) {
       logger.error("Message validation failed", {
@@ -156,7 +142,6 @@ const gracefulShutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}, shutting down gracefully...`);
 
   try {
-    // TODO: Add cleanup logic here (close RabbitMQ connections, etc.)
     logger.info("Worker shutdown complete");
     process.exit(0);
   } catch (error) {
@@ -228,7 +213,8 @@ const startWorker = async (): Promise<void> => {
           error: error instanceof Error ? error.message : String(error),
           messageSize: msg.content.length,
         });
-        // Message will be retried or sent to dead letter queue by RabbitMQ
+
+        throw error;
       }
     });
 
@@ -244,6 +230,11 @@ const startWorker = async (): Promise<void> => {
 // ============================================================================
 // MAIN EXECUTION
 // ============================================================================
+
+logger.info("✅ Info Message");
+logger.debug("✅ Debug Message");
+logger.warn("✅ Warn Message");
+logger.error("✅ Error Message");
 
 // Start the worker
 startWorker().catch((error) => {

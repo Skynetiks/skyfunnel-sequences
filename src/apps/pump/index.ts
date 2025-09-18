@@ -38,35 +38,40 @@ const revertOutbox = withErrorHandlingFn(async (id: string) => {
 const handleOutbox = async (outbox: OutboxJob) => {
   try {
     const rabbitMq = await RabbitMQService.getInstance();
-    rabbitMq.send(outbox.topic, outbox.payload);
+    const payload = JSON.parse(outbox.payload as string);
+    rabbitMq.send(outbox.topic, payload);
   } catch (error) {
     logger.error("Error handling outbox jobs", { error });
     revertOutbox(outbox.id);
     return;
   }
 };
-
-while (true) {
+const handleOutboxQueue = async (): Promise<boolean> => {
   try {
-    logger.info("Running......");
+    logger.info("Checking for pending outbox jobs");
     const [outboxes, error] = await getPendingOutboxJobs(10);
     if (error || !outboxes) {
       logger.error("Error getting pending outbox jobs", { error });
-      continue;
+      return false;
     }
 
     if (outboxes.length === 0) {
       logger.info("No pending outbox jobs found");
-      continue;
+      return false;
     }
 
     for (const outbox of outboxes) {
       await handleOutbox(outbox);
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return true;
   } catch (error) {
     logger.error("Error handling outbox jobs", { error });
-    continue;
+    return false;
   }
+};
+
+while (true) {
+  const hasMoreJobs = await handleOutboxQueue();
+  await new Promise((resolve) => setTimeout(resolve, hasMoreJobs ? 1000 : 10000));
 }

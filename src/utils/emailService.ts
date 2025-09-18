@@ -1,4 +1,6 @@
+import type { SendEmailCommandOutput } from "@aws-sdk/client-ses";
 import { logger } from "./logger";
+import { sendWithSES } from "./ses";
 
 // ============================================================================
 // TYPES
@@ -29,18 +31,11 @@ export interface EmailAttachment {
   cid?: string;
 }
 
-export interface EmailProvider {
-  name: string;
-  sendEmail(emailData: EmailData): Promise<EmailResult>;
-  validateEmail(emailData: EmailData): Promise<boolean>;
-}
-
 export interface EmailResult {
   success: boolean;
   messageId?: string;
-  providerId?: string;
   error?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: SendEmailCommandOutput;
 }
 
 export interface EmailServiceConfig {
@@ -59,8 +54,6 @@ export interface EmailServiceConfig {
 
 export class EmailService {
   private config: Required<EmailServiceConfig>;
-  private providers: Map<string, EmailProvider> = new Map();
-  private defaultProvider?: EmailProvider;
 
   constructor(config: EmailServiceConfig) {
     this.config = {
@@ -75,39 +68,12 @@ export class EmailService {
   }
 
   /**
-   * Registers an email provider
+   * Sends an email with retry logic
    */
-  registerProvider(provider: EmailProvider, isDefault = false): void {
-    this.providers.set(provider.name, provider);
-
-    if (isDefault || !this.defaultProvider) {
-      this.defaultProvider = provider;
-    }
-
-    if (this.config.enableLogging) {
-      logger.info("Email provider registered", {
-        provider: provider.name,
-        isDefault,
-      });
-    }
-  }
-
-  /**
-   * Sends an email using the default or specified provider
-   */
-  async sendEmail(emailData: EmailData, providerName?: string): Promise<EmailResult> {
-    const provider = providerName ? this.providers.get(providerName) : this.defaultProvider;
-
-    if (!provider) {
-      const error = `No email provider found${providerName ? ` named ${providerName}` : ""}`;
-      logger.error("Email sending failed", { error, emailData: this.sanitizeEmailData(emailData) });
-      return { success: false, error };
-    }
-
+  async sendEmail(emailData: EmailData): Promise<EmailResult> {
     try {
-      // Validate email data if enabled
       if (this.config.enableValidation) {
-        const isValid = await this.validateEmailData(emailData);
+        const isValid = this.validateEmailData(emailData);
         if (!isValid) {
           const error = "Email data validation failed";
           logger.error("Email sending failed", { error, emailData: this.sanitizeEmailData(emailData) });
@@ -115,48 +81,22 @@ export class EmailService {
         }
       }
 
-      // Prepare email data with defaults
       const preparedEmailData = this.prepareEmailData(emailData);
 
       if (this.config.enableLogging) {
         logger.info("Sending email", {
           to: preparedEmailData.to,
           subject: preparedEmailData.subject,
-          provider: provider.name,
           leadId: preparedEmailData.leadId,
           stepId: preparedEmailData.stepId,
         });
       }
 
-      // Send email with retry logic
-      const result = await this.sendWithRetry(provider, preparedEmailData);
-
-      if (this.config.enableLogging) {
-        if (result.success) {
-          logger.info("Email sent successfully", {
-            to: preparedEmailData.to,
-            messageId: result.messageId,
-            provider: provider.name,
-            leadId: preparedEmailData.leadId,
-            stepId: preparedEmailData.stepId,
-          });
-        } else {
-          logger.error("Email sending failed", {
-            to: preparedEmailData.to,
-            error: result.error,
-            provider: provider.name,
-            leadId: preparedEmailData.leadId,
-            stepId: preparedEmailData.stepId,
-          });
-        }
-      }
-
-      return result;
+      return await this.sendWithRetry(preparedEmailData);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error("Email sending failed with exception", {
         error: errorMessage,
-        provider: provider.name,
         emailData: this.sanitizeEmailData(emailData),
       });
 
@@ -165,41 +105,35 @@ export class EmailService {
   }
 
   /**
-   * Validates email data
+   * Internal function that actually sends the email
+   * Replace with nodemailer, SES, Resend, etc.
    */
-  private async validateEmailData(emailData: EmailData): Promise<boolean> {
-    try {
-      // Basic validation
-      if (!emailData.to || !emailData.to.includes("@")) {
-        logger.warn("Invalid email address", { to: emailData.to });
-        return false;
-      }
-
-      if (!emailData.subject || emailData.subject.trim().length === 0) {
-        logger.warn("Empty email subject");
-        return false;
-      }
-
-      if (!emailData.body || emailData.body.trim().length === 0) {
-        logger.warn("Empty email body");
-        return false;
-      }
-
-      // Provider-specific validation
-      const provider = this.defaultProvider;
-      if (provider && typeof provider.validateEmail === "function") {
-        return await provider.validateEmail(emailData);
-      }
-
-      return true;
-    } catch (error) {
-      logger.error("Email validation failed", { error });
-      return false;
-    }
+  private async internalSend(emailData: EmailData): Promise<EmailResult> {
+    const res = sendWithSES(emailData);
+    return res;
   }
 
   /**
-   * Prepares email data with default values
+   * Validation
+   */
+  private validateEmailData(emailData: EmailData): boolean {
+    if (!emailData.to || !emailData.to.includes("@")) {
+      logger.warn("Invalid email address", { to: emailData.to });
+      return false;
+    }
+    if (!emailData.subject?.trim()) {
+      logger.warn("Empty email subject");
+      return false;
+    }
+    if (!emailData.body?.trim()) {
+      logger.warn("Empty email body");
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Apply defaults
    */
   private prepareEmailData(emailData: EmailData): EmailData {
     return {
@@ -211,46 +145,27 @@ export class EmailService {
   }
 
   /**
-   * Sends email with retry logic
+   * Retry wrapper around internalSend
    */
-  private async sendWithRetry(provider: EmailProvider, emailData: EmailData): Promise<EmailResult> {
+  private async sendWithRetry(emailData: EmailData): Promise<EmailResult> {
     let lastError: string | undefined;
 
     for (let attempt = 1; attempt <= this.config.retryAttempts; attempt++) {
       try {
-        const result = await provider.sendEmail(emailData);
-
+        const result = await this.internalSend(emailData);
         if (result.success) {
           return result;
         }
 
         lastError = result.error;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
 
-        if (attempt < this.config.retryAttempts) {
-          const delay = this.config.retryDelay * attempt;
-          logger.warn("Email sending failed, retrying", {
-            attempt,
-            maxAttempts: this.config.retryAttempts,
-            delay,
-            error: lastError,
-          });
-
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
-
-        if (attempt < this.config.retryAttempts) {
-          const delay = this.config.retryDelay * attempt;
-          logger.warn("Email sending failed with exception, retrying", {
-            attempt,
-            maxAttempts: this.config.retryAttempts,
-            delay,
-            error: lastError,
-          });
-
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
+      if (attempt < this.config.retryAttempts) {
+        const delay = this.config.retryDelay * attempt;
+        logger.warn("Retrying email send", { attempt, error: lastError, delay });
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
 
@@ -258,7 +173,7 @@ export class EmailService {
   }
 
   /**
-   * Sanitizes email data for logging (removes sensitive information)
+   * Sanitize logs
    */
   private sanitizeEmailData(emailData: EmailData): Partial<EmailData> {
     return {
@@ -270,25 +185,12 @@ export class EmailService {
       templateId: emailData.templateId,
     };
   }
-
-  /**
-   * Gets list of registered providers
-   */
-  getProviders(): string[] {
-    return Array.from(this.providers.keys());
-  }
-
-  /**
-   * Gets the default provider name
-   */
-  getDefaultProvider(): string | undefined {
-    return this.defaultProvider?.name;
-  }
 }
 
-/**
- * Creates email data from template processing result
- */
+// ============================================================================
+// HELPER
+// ============================================================================
+
 export const createEmailData = (
   to: string,
   subject: string,
@@ -298,15 +200,13 @@ export const createEmailData = (
   stepId: string,
   templateId: string,
   options?: Partial<EmailData>,
-): EmailData => {
-  return {
-    to,
-    subject,
-    body,
-    leadId,
-    sequenceId,
-    stepId,
-    templateId,
-    ...options,
-  };
-};
+): EmailData => ({
+  to,
+  subject,
+  body,
+  leadId,
+  sequenceId,
+  stepId,
+  templateId,
+  ...options,
+});

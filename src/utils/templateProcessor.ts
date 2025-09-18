@@ -76,7 +76,7 @@ export class TemplateProcessor {
         },
         template: templateData ?? {
           sequenceTemplate: { id: "", templateId: "", subject: "" },
-          emailTemplate: { id: "", name: "", subject: "", body: "", variables: [] },
+          emailTemplate: { id: "", name: "", subject: "", bodyHTML: "" },
         },
         raw: template,
       };

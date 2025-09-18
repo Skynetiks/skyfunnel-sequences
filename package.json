@@ -26,6 +26,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@aws-sdk/client-ses": "^3.888.0",
     "@google/genai": "^1.19.0",
     "@types/amqplib": "^0.10.7",
     "amqplib": "^0.10.9",

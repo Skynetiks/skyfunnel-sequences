@@ -26,6 +26,9 @@ const envSchema = z.object({
     .default("false"),
 
   GEMINI_API_KEY: z.string().min(1, "GEMINI_API_KEY is required"),
+  AWS_ACCESS_KEY_ID: z.string().min(1, "AWS_ACCESS_KEY_ID is required"),
+  AWS_SECRET_ACCESS_KEY: z.string().min(1, "AWS_SECRET_ACCESS_KEY is required"),
+  AWS_REGION: z.string().min(1, "AWS_REGION is required"),
 });
 
 // Parse and validate environment variables

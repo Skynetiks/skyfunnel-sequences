@@ -15,13 +15,13 @@ export const getPendingLeads = withErrorHandlingFn(
   (max: number = 50) => {
     return sql<PendingLead[]>`
     SELECT
-        "leadState"."id" AS "leadStateId",
-        "leadState"."leadId",
-        "leadState"."sequenceId",
-        "leadState"."currentStep",
-        "seqStep"."id" AS "stepId",
-        "seqStep"."stepNumber",
-        "seqStep"."minIntervalMin"
+        "leadState"."id" AS "lead_state_id",
+        "leadState"."leadId" AS "lead_id",
+        "leadState"."sequenceId" AS "sequence_id",
+        "leadState"."currentStep" AS "current_step",
+        "seqStep"."id" AS "step_id",
+        "seqStep"."stepNumber" AS "step_number",
+        "seqStep"."minIntervalMin" AS "min_interval_min"
     FROM "LeadSequenceState" AS "leadState"
     JOIN "SequenceStep" AS "seqStep"
         ON "seqStep"."sequenceId" = "leadState"."sequenceId"

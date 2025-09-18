@@ -11,6 +11,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const handleBatch = async (leads: PendingLead[]) => {
   for (const lead of leads) {
+    console.log(lead);
     const idemKey = makeIdemKey(lead.sequence_id, lead.lead_id, lead.current_step);
     await sql.begin(async (sql) => {
       const isExisting = await sql`
@@ -27,7 +28,7 @@ const handleBatch = async (leads: PendingLead[]) => {
       const stringifiedRow = JSON.stringify(lead);
       await sql`
         INSERT INTO "Outbox" ("id", "topic", "payload", "idemKey")
-        VALUES (uuid_generate_v4(), ${SEQUENCE_TOPIC}, ${stringifiedRow}::jsonb, ${idemKey})
+        VALUES (gen_random_uuid(), ${SEQUENCE_TOPIC}, ${stringifiedRow}::jsonb, ${idemKey})
         `;
 
       await sql`

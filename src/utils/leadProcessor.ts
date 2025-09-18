@@ -10,7 +10,8 @@ import {
   type LeadWithEnrichment,
 } from "../db/queries/lead";
 import { createTemplateProcessor, type TemplateProcessorConfig } from "./templateProcessor";
-import { createEmailData, type EmailServiceConfig } from "./emailService";
+import { createEmailData, EmailService, type EmailServiceConfig } from "./emailService";
+import { AppError, ErrorCategory, ErrorSeverity } from "./error-handler";
 
 // ============================================================================
 // LEAD PROCESSOR CONFIGURATION
@@ -58,7 +59,13 @@ export class LeadProcessor {
 
     try {
       // Fetch all required data in parallel
-      const [leadData, sequenceStep] = await Promise.all([fetchLeadData(lead_id), fetchSequenceStep(step_id)]);
+      logger.debug("Fetching lead data and sequence step");
+      const leadData = await fetchLeadData(lead_id);
+      const sequenceStep = await fetchSequenceStep(step_id);
+      logger.debug("Processing Lead Data", {
+        leadData,
+        sequenceStep,
+      });
 
       // Validate required data
       this.validateLeadData(leadData, lead_id);
@@ -69,14 +76,33 @@ export class LeadProcessor {
 
       // Fetch email template data
       let templateData: TemplateData | null = null;
-      if (sequenceStep.templateId) {
-        templateData = await fetchEmailTemplate(sequenceStep.templateId);
+      if (sequenceStep.id) {
+        templateData = await fetchEmailTemplate(sequenceStep.id);
+      }
+
+      if (!templateData) {
+        logger.debug("No template found for step", {
+          stepId: step_id,
+          sequenceId: sequence_id,
+        });
+
+        throw new AppError("No template data found", "400", ErrorCategory.VALIDATION, ErrorSeverity.LOW, {
+          leadId: lead_id,
+          stepId: step_id,
+          sequenceId: sequence_id,
+        });
       }
 
       // Prepare and send email
       const emailData = await this.prepareEmailData(leadData, sequenceStep, templateData);
-      console.log("emailData", emailData);
-      //   TODO: SEND EMAIL
+      console.log(emailData);
+      const emailService = new EmailService(this.config.emailService);
+      const result = await emailService.sendEmail(emailData);
+      console.log(result);
+
+      if (!result.success) {
+        throw new Error(`Failed to send email: ${result.error}`);
+      }
 
       if (this.config.enableLogging) {
         logger.info("Lead processed successfully", {
@@ -84,11 +110,12 @@ export class LeadProcessor {
           stepId: step_id,
           sequenceId: sequence_id,
           emailSent: true,
-          templateId: sequenceStep.templateId,
-          //   messageId: result.messageId,
+          templateId: sequenceStep.id,
+          messageId: result.messageId,
         });
       }
     } catch (error) {
+      console.error(error);
       if (this.config.enableLogging) {
         logger.error("Failed to process lead", {
           leadId: lead_id,
@@ -97,6 +124,7 @@ export class LeadProcessor {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+
       throw error;
     }
   }
@@ -158,7 +186,7 @@ export class LeadProcessor {
   ) {
     // Use template data if available
     const subject = templateData?.sequenceTemplate.subject || templateData?.emailTemplate.subject || "No Subject";
-    const body = templateData?.emailTemplate.body || "";
+    const body = templateData?.emailTemplate.bodyHTML || "";
 
     // Process templates with lead data
     const processedSubject = await this.templateProcessor.processTemplate(subject, leadData);
@@ -221,6 +249,6 @@ export const createLeadProcessor = (config?: Partial<LeadProcessorConfig>): Lead
  * @deprecated Use createLeadProcessor() and call processLead() method instead
  */
 export const processLead = async (lead: PendingLead): Promise<void> => {
-  const processor = createLeadProcessor();
+  const processor = createLeadProcessor({ enableLogging: true });
   return processor.processLead(lead);
 };

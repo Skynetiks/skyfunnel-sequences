@@ -47,35 +47,12 @@ export async function withRetry<T>(
 /**
  * Timeout wrapper for async operations
  */
-export async function withTimeout<T>(
-  operation: () => Promise<T>,
-  timeoutMs: number,
-  context?: Record<string, unknown>,
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      const timeoutError = new AppError(
-        `Operation timed out after ${timeoutMs}ms`,
-        "OPERATION_TIMEOUT",
-        ErrorCategory.SYSTEM,
-        ErrorSeverity.MEDIUM,
-        { timeoutMs, ...context },
-      );
-      errorHandler.handle(timeoutError);
-      reject(timeoutError);
-    }, timeoutMs);
-
-    operation()
-      .then((result) => {
-        clearTimeout(timer);
-        resolve(result);
-      })
-      .catch((error) => {
-        clearTimeout(timer);
-        errorHandler.handle(error as Error, context);
-        reject(error);
-      });
-  });
+// helper: wrap any promise with a timeout
+export async function withTimeout<T>(promise: Promise<T>, ms: number, name = "Operation"): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${name} timed out after ${ms}ms`)), ms)),
+  ]);
 }
 
 /**
